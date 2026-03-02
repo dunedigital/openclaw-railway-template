@@ -1,4 +1,4 @@
-# OpenClaw Railway Template (1‑click deploy)
+# OpenClaw Railway Template WITH CHROMIUM Included (1‑click deploy)
 
 ## Setup
 
