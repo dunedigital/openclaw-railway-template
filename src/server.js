@@ -148,6 +148,28 @@ function isConfigured() {
   }
 }
 
+async function syncAllowedOrigins() {
+  const publicDomain = process.env.RAILWAY_PUBLIC_DOMAIN;
+  if (!publicDomain) return;
+
+  const origin = `https://${publicDomain}`;
+  const result = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs([
+      "config",
+      "set",
+      "--json",
+      "gateway.controlUi.allowedOrigins",
+      JSON.stringify([origin]),
+    ]),
+  );
+  if (result.code === 0) {
+    log.info("gateway", `set allowedOrigins to [${origin}]`);
+  } else {
+    log.warn("gateway", `failed to set allowedOrigins (exit=${result.code})`);
+  }
+}
+
 let gatewayProc = null;
 let gatewayStarting = null;
 let shuttingDown = false;
@@ -193,14 +215,8 @@ async function startGateway() {
   fs.mkdirSync(STATE_DIR, { recursive: true });
   fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
 
-  for (const lockPath of [
-    path.join(STATE_DIR, "gateway.lock"),
-    "/tmp/openclaw-gateway.lock",
-  ]) {
-    try {
-      fs.rmSync(lockPath, { force: true });
-    } catch {}
-  }
+  const stopResult = await runCmd(OPENCLAW_NODE, clawArgs(["gateway", "stop"]));
+  log.info("gateway", `stop existing gateway exit=${stopResult.code}`);
 
   const args = [
     "gateway",
@@ -259,6 +275,7 @@ async function ensureGatewayRunning() {
   if (gatewayProc) return { ok: true };
   if (!gatewayStarting) {
     gatewayStarting = (async () => {
+      await syncAllowedOrigins();
       await startGateway();
       const ready = await waitForGatewayReady({ timeoutMs: 60_000 });
       if (!ready) {
@@ -1112,14 +1129,18 @@ proxy.on("error", (err, _req, res) => {
   }
 });
 
+const PROXY_ORIGIN = process.env.RAILWAY_PUBLIC_DOMAIN
+  ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+  : GATEWAY_TARGET;
+
 proxy.on("proxyReq", (proxyReq, req, res) => {
   proxyReq.setHeader("Authorization", `Bearer ${OPENCLAW_GATEWAY_TOKEN}`);
-  proxyReq.setHeader("Origin", GATEWAY_TARGET);
+  proxyReq.setHeader("Origin", PROXY_ORIGIN);
 });
 
 proxy.on("proxyReqWs", (proxyReq, req, socket, options, head) => {
   proxyReq.setHeader("Authorization", `Bearer ${OPENCLAW_GATEWAY_TOKEN}`);
-  proxyReq.setHeader("Origin", GATEWAY_TARGET);
+  proxyReq.setHeader("Origin", PROXY_ORIGIN);
 });
 
 app.use(async (req, res) => {
